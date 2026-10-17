@@ -43,6 +43,8 @@ run_report() {
     MOCK_FAIL_FREE="${RUN_FAIL_FREE:-0}" \
     MOCK_FAIL_UPTIME="${RUN_FAIL_UPTIME:-0}" \
     MOCK_FAIL_SYSTEMCTL="${RUN_FAIL_SYSTEMCTL:-0}" \
+    MOCK_BAD_DF="${RUN_BAD_DF:-0}" \
+    MOCK_BAD_FREE="${RUN_BAD_FREE:-0}" \
     MOCK_BAD_UPTIME="${RUN_BAD_UPTIME:-0}" \
     "$BASH_BIN" "$PROJECT_DIR/health-report" "$@" 2>&1); then
     RUN_STATUS=0
@@ -57,6 +59,7 @@ printf 'df' >> "$MOCK_CALL_LOG"
 for arg in "$@"; do printf ' %s' "$arg" >> "$MOCK_CALL_LOG"; done
 printf '\n' >> "$MOCK_CALL_LOG"
 [ "${MOCK_FAIL_DF:-0}" = 1 ] && exit 4
+[ "${MOCK_BAD_DF:-0}" = 1 ] && { printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/root 1:2 1 1 25%% /\n'; exit 0; }
 printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/root 1000000 250000 750000 25%% /\n'
 MOCK
 
@@ -66,6 +69,7 @@ printf 'free' >> "$MOCK_CALL_LOG"
 for arg in "$@"; do printf ' %s' "$arg" >> "$MOCK_CALL_LOG"; done
 printf '\n' >> "$MOCK_CALL_LOG"
 [ "${MOCK_FAIL_FREE:-0}" = 1 ] && exit 4
+[ "${MOCK_BAD_FREE:-0}" = 1 ] && { printf '               total used free shared buff/cache available\nMem:            4096 1024 512 128 2560 2:800\n'; exit 0; }
 printf '               total used free shared buff/cache available\nMem:            4096 1024 512 128 2560 2800\nSwap:              0    0   0\n'
 MOCK
 
@@ -182,6 +186,19 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as report_file:
     report = json.load(report_file)
 assert report["load_average"]["status"] == "unavailable"
+PY
+
+RUN_BAD_DF=1 RUN_BAD_FREE=1 run_report "$MOCK_BIN" --json
+assert_status 0
+printf '%s\n' "$RUN_OUTPUT" > "$JSON_FILE"
+"$PYTHON_BIN" - "$JSON_FILE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as report_file:
+    report = json.load(report_file)
+assert report["disk"]["status"] == "unavailable"
+assert report["memory"]["status"] == "unavailable"
 PY
 
 run_report "$MOCK_BIN" --help

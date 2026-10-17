@@ -5,6 +5,13 @@ usage() {
   printf 'Report root disk, memory, load average, and only the requested systemd services.\n'
 }
 
+is_unsigned_integer() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 services=()
 json_output=false
 while [ "$#" -gt 0 ]; do
@@ -55,14 +62,12 @@ if command -v df >/dev/null 2>&1; then
     done <<< "$df_output"
     read -r filesystem disk_size_kib disk_used_kib disk_available_kib disk_percent mount_point <<< "$df_line"
     disk_percent=${disk_percent%%%}
-    case "$disk_size_kib:$disk_used_kib:$disk_available_kib:$disk_percent" in
-      *[!0-9:]*) ;;
-      *)
-        if [ -n "$disk_size_kib" ] && [ -n "$disk_used_kib" ] && [ -n "$disk_available_kib" ] && [ -n "$disk_percent" ]; then
-          root_disk_status=available
-        fi
-        ;;
-    esac
+    if is_unsigned_integer "$disk_size_kib" \
+      && is_unsigned_integer "$disk_used_kib" \
+      && is_unsigned_integer "$disk_available_kib" \
+      && is_unsigned_integer "$disk_percent"; then
+      root_disk_status=available
+    fi
   fi
 fi
 
@@ -81,14 +86,11 @@ if command -v free >/dev/null 2>&1; then
       esac
     done <<< "$free_output"
     read -r memory_label memory_total_mib memory_used_mib memory_free_mib memory_shared_mib memory_cache_mib memory_available_mib <<< "$memory_line"
-    case "$memory_total_mib:$memory_used_mib:$memory_available_mib" in
-      *[!0-9:]*) ;;
-      *)
-        if [ -n "$memory_total_mib" ] && [ -n "$memory_used_mib" ] && [ -n "$memory_available_mib" ]; then
-          memory_status=available
-        fi
-        ;;
-    esac
+    if is_unsigned_integer "$memory_total_mib" \
+      && is_unsigned_integer "$memory_used_mib" \
+      && is_unsigned_integer "$memory_available_mib"; then
+      memory_status=available
+    fi
   fi
 fi
 
