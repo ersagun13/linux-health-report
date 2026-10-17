@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+
+usage() {
+  printf 'Usage: health-report [--service NAME]\n'
+  printf 'Report root disk, memory, load average, and requested systemd service states.\n'
+}
+
+services=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --service)
+      if [ "$#" -lt 2 ]; then
+        printf 'health-report: --service requires a name\n' >&2
+        usage >&2
+        exit 2
+      fi
+      case "$2" in
+        ''|-*|*[!A-Za-z0-9_.@:+-]*)
+          printf 'health-report: invalid service name: %s\n' "$2" >&2
+          exit 2
+          ;;
+      esac
+      services[${#services[@]}]=$2
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'health-report: unknown option: %s\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+root_disk_status=unavailable
+disk_size_kib=
+disk_used_kib=
+disk_available_kib=
+disk_used_percent=
+if command -v df >/dev/null 2>&1; then
+  df_output=$(LC_ALL=C df -P -k / 2>/dev/null)
+  df_exit=$?
+  if [ "$df_exit" -eq 0 ]; then
+    df_line=
+    while IFS= read -r line; do
+      [ -n "$line" ] && df_line=$line
+    done <<< "$df_output"
+    read -r filesystem disk_size_kib disk_used_kib disk_available_kib disk_percent mount_point <<< "$df_line"
+    disk_percent=${disk_percent%%%}
+    case "$disk_size_kib:$disk_used_kib:$disk_available_kib:$disk_percent" in
+      *[!0-9:]*) ;;
+      *)
+        if [ -n "$disk_size_kib" ] && [ -n "$disk_used_kib" ] && [ -n "$disk_available_kib" ] && [ -n "$disk_percent" ]; then
+          root_disk_status=available
+        fi
+        ;;
+    esac
+  fi
+fi
+
+memory_status=unavailable
+memory_total_mib=
+memory_used_mib=
+memory_available_mib=
+if command -v free >/dev/null 2>&1; then
+  free_output=$(LC_ALL=C free -m 2>/dev/null)
+  free_exit=$?
+  if [ "$free_exit" -eq 0 ]; then
+    memory_line=
+    while IFS= read -r line; do
+      case "$line" in
+        Mem:*) memory_line=$line; break ;;
+      esac
+    done <<< "$free_output"
+    read -r memory_label memory_total_mib memory_used_mib memory_free_mib memory_shared_mib memory_cache_mib memory_available_mib <<< "$memory_line"
+    case "$memory_total_mib:$memory_used_mib:$memory_available_mib" in
+      *[!0-9:]*) ;;
+      *)
+        if [ -n "$memory_total_mib" ] && [ -n "$memory_used_mib" ] && [ -n "$memory_available_mib" ]; then
+          memory_status=available
+        fi
+        ;;
+    esac
+  fi
+fi
+
+load_status=unavailable
+load_one=
+load_five=
+load_fifteen=
+if command -v uptime >/dev/null 2>&1; then
+  uptime_output=$(LC_ALL=C uptime 2>/dev/null)
+  uptime_exit=$?
+  if [ "$uptime_exit" -eq 0 ]; then
+    case "$uptime_output" in
+      *'load average:'*) load_values=${uptime_output##*load average:} ;;
+      *) load_values= ;;
+    esac
+    load_values=${load_values//,/ }
+    read -r load_one load_five load_fifteen <<< "$load_values"
+    if [ -n "$load_one" ] && [ -n "$load_five" ] && [ -n "$load_fifteen" ]; then
+      case "$load_one:$load_five:$load_fifteen" in
+        *[!0-9.:]*) ;;
+        *) load_status=available ;;
+      esac
+    fi
+  fi
+fi
+
+service_states=()
+for service in "${services[@]}"; do
+  service_state=unavailable
+  if command -v systemctl >/dev/null 2>&1; then
+    service_output=$(LC_ALL=C systemctl is-active "$service" 2>/dev/null)
+    case "$service_output" in
+      active|inactive|failed|activating|deactivating|reloading|maintenance|unknown)
+        service_state=$service_output
+        ;;
+      *) service_state=unavailable ;;
+    esac
+  fi
+  service_states[${#service_states[@]}]="$service"$'\t'"$service_state"
+done
+
+printf 'Linux health report\n'
+if [ "$root_disk_status" = available ]; then
+  printf 'Root disk: %s%% used (%s KiB used of %s KiB, %s KiB available)\n' "$disk_percent" "$disk_used_kib" "$disk_size_kib" "$disk_available_kib"
+else
+  printf 'Root disk: unavailable\n'
+fi
+if [ "$memory_status" = available ]; then
+  printf 'Memory: %s MiB used of %s MiB (%s MiB available)\n' "$memory_used_mib" "$memory_total_mib" "$memory_available_mib"
+else
+  printf 'Memory: unavailable\n'
+fi
+if [ "$load_status" = available ]; then
+  printf 'Load average: %s, %s, %s\n' "$load_one" "$load_five" "$load_fifteen"
+else
+  printf 'Load average: unavailable\n'
+fi
+if [ "${#services[@]}" -eq 0 ]; then
+  printf 'Services: none requested\n'
+else
+  printf 'Services:\n'
+  for service_record in "${service_states[@]}"; do
+    IFS=$'\t' read -r service service_state <<< "$service_record"
+    printf '  %s: %s\n' "$service" "$service_state"
+  done
+fi
