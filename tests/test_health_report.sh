@@ -62,6 +62,7 @@ printf '\n' >> "$MOCK_CALL_LOG"
 case "${MOCK_BAD_DF:-0}" in
   colon) printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/root 1:2 1 1 25%% /\n'; exit 0 ;;
   leading-zero) printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/root 00 1 1 25%% /\n'; exit 0 ;;
+  invalid-suffix) printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/root 12x 1 1 25%% /\n'; exit 0 ;;
 esac
 printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/root 1000000 250000 750000 25%% /\n'
 MOCK
@@ -205,6 +206,18 @@ assert report["memory"]["status"] == "unavailable"
 PY
 
 RUN_BAD_DF=leading-zero run_report "$MOCK_BIN" --json
+assert_status 0
+printf '%s\n' "$RUN_OUTPUT" > "$JSON_FILE"
+"$PYTHON_BIN" - "$JSON_FILE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as report_file:
+    report = json.load(report_file)
+assert report["disk"]["status"] == "unavailable"
+PY
+
+RUN_BAD_DF=invalid-suffix run_report "$MOCK_BIN" --json
 assert_status 0
 printf '%s\n' "$RUN_OUTPUT" > "$JSON_FILE"
 "$PYTHON_BIN" - "$JSON_FILE" <<'PY'
