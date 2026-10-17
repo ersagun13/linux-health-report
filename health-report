@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 usage() {
-  printf 'Usage: health-report [--service NAME]\n'
-  printf 'Report root disk, memory, load average, and requested systemd service states.\n'
+  printf 'Usage: health-report [--json] [--service NAME]...\n'
+  printf 'Report root disk, memory, load average, and only the requested systemd services.\n'
 }
 
 services=()
@@ -94,7 +94,7 @@ fi
 
 is_json_number() {
   case "$1" in
-    ''|*[!0-9.]*|.*|*.|*.*.*) return 1 ;;
+    ''|*[!0-9.]*|.*|*.|*.*.*|0[0-9]*) return 1 ;;
     *) return 0 ;;
   esac
 }

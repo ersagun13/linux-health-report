@@ -75,7 +75,7 @@ printf 'uptime' >> "$MOCK_CALL_LOG"
 for arg in "$@"; do printf ' %s' "$arg" >> "$MOCK_CALL_LOG"; done
 printf '\n' >> "$MOCK_CALL_LOG"
 [ "${MOCK_FAIL_UPTIME:-0}" = 1 ] && exit 4
-[ "${MOCK_BAD_UPTIME:-0}" = 1 ] && { printf 'load average: 1..2, 0.08, 0.04\n'; exit 0; }
+[ "${MOCK_BAD_UPTIME:-0}" = 1 ] && { printf 'load average: 00.08, 0.08, 0.04\n'; exit 0; }
 printf ' 22:37:10 up 1 day, 2 users, load average: 0.12, 0.08, 0.04\n'
 MOCK
 
@@ -183,5 +183,9 @@ with open(sys.argv[1], encoding="utf-8") as report_file:
     report = json.load(report_file)
 assert report["load_average"]["status"] == "unavailable"
 PY
+
+run_report "$MOCK_BIN" --help
+assert_status 0
+assert_contains "$RUN_OUTPUT" 'Usage: health-report [--json] [--service NAME]...'
 
 printf 'PASS: system metrics, selected services, optional systemctl, text/JSON output, escaping, and command failures\n'
