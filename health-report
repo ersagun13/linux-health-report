@@ -6,6 +6,7 @@ usage() {
 }
 
 services=()
+json_output=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --service)
@@ -15,13 +16,17 @@ while [ "$#" -gt 0 ]; do
         exit 2
       fi
       case "$2" in
-        ''|-*|*[!A-Za-z0-9_.@:+-]*)
+        ''|-*|*[[:cntrl:]]*)
           printf 'health-report: invalid service name: %s\n' "$2" >&2
           exit 2
           ;;
       esac
       services[${#services[@]}]=$2
       shift 2
+      ;;
+    --json)
+      json_output=true
+      shift
       ;;
     --help|-h)
       usage
@@ -87,6 +92,13 @@ if command -v free >/dev/null 2>&1; then
   fi
 fi
 
+is_json_number() {
+  case "$1" in
+    ''|*[!0-9.]*|.*|*.|*.*.*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 load_status=unavailable
 load_one=
 load_five=
@@ -101,11 +113,8 @@ if command -v uptime >/dev/null 2>&1; then
     esac
     load_values=${load_values//,/ }
     read -r load_one load_five load_fifteen <<< "$load_values"
-    if [ -n "$load_one" ] && [ -n "$load_five" ] && [ -n "$load_fifteen" ]; then
-      case "$load_one:$load_five:$load_fifteen" in
-        *[!0-9.:]*) ;;
-        *) load_status=available ;;
-      esac
+    if is_json_number "$load_one" && is_json_number "$load_five" && is_json_number "$load_fifteen"; then
+      load_status=available
     fi
   fi
 fi
@@ -125,28 +134,91 @@ for service in "${services[@]}"; do
   service_states[${#service_states[@]}]="$service"$'\t'"$service_state"
 done
 
-printf 'Linux health report\n'
-if [ "$root_disk_status" = available ]; then
-  printf 'Root disk: %s%% used (%s KiB used of %s KiB, %s KiB available)\n' "$disk_percent" "$disk_used_kib" "$disk_size_kib" "$disk_available_kib"
-else
-  printf 'Root disk: unavailable\n'
-fi
-if [ "$memory_status" = available ]; then
-  printf 'Memory: %s MiB used of %s MiB (%s MiB available)\n' "$memory_used_mib" "$memory_total_mib" "$memory_available_mib"
-else
-  printf 'Memory: unavailable\n'
-fi
-if [ "$load_status" = available ]; then
-  printf 'Load average: %s, %s, %s\n' "$load_one" "$load_five" "$load_fifteen"
-else
-  printf 'Load average: unavailable\n'
-fi
-if [ "${#services[@]}" -eq 0 ]; then
-  printf 'Services: none requested\n'
-else
-  printf 'Services:\n'
-  for service_record in "${service_states[@]}"; do
-    IFS=$'\t' read -r service service_state <<< "$service_record"
-    printf '  %s: %s\n' "$service" "$service_state"
+escape_json_string() {
+  local value=$1 escaped= character index
+  index=0
+  while [ "$index" -lt "${#value}" ]; do
+    character=${value:index:1}
+    case "$character" in
+      '"') escaped="${escaped}\\\"" ;;
+      '\') escaped="${escaped}\\\\"
+        ;;
+      *) escaped="${escaped}${character}" ;;
+    esac
+    index=$((index + 1))
   done
+  JSON_ESCAPED=$escaped
+}
+
+print_json() {
+  printf '{\n'
+  if [ "$root_disk_status" = available ]; then
+    printf '  "disk": {"status": "available", "size_kib": %s, "used_kib": %s, "available_kib": %s, "used_percent": %s},\n' \
+      "$disk_size_kib" "$disk_used_kib" "$disk_available_kib" "$disk_percent"
+  else
+    printf '  "disk": {"status": "unavailable", "size_kib": null, "used_kib": null, "available_kib": null, "used_percent": null},\n'
+  fi
+  if [ "$memory_status" = available ]; then
+    printf '  "memory": {"status": "available", "total_mib": %s, "used_mib": %s, "available_mib": %s},\n' \
+      "$memory_total_mib" "$memory_used_mib" "$memory_available_mib"
+  else
+    printf '  "memory": {"status": "unavailable", "total_mib": null, "used_mib": null, "available_mib": null},\n'
+  fi
+  if [ "$load_status" = available ]; then
+    printf '  "load_average": {"status": "available", "one_minute": %s, "five_minutes": %s, "fifteen_minutes": %s},\n' \
+      "$load_one" "$load_five" "$load_fifteen"
+  else
+    printf '  "load_average": {"status": "unavailable", "one_minute": null, "five_minutes": null, "fifteen_minutes": null},\n'
+  fi
+
+  printf '  "services": ['
+  if [ "${#service_states[@]}" -gt 0 ]; then
+    printf '\n'
+    service_count=0
+    for service_record in "${service_states[@]}"; do
+      IFS=$'\t' read -r service service_state <<< "$service_record"
+      [ "$service_count" -eq 0 ] || printf ',\n'
+      escape_json_string "$service"
+      printf '    {"name": "%s", "status": "%s"}' "$JSON_ESCAPED" "$service_state"
+      service_count=$((service_count + 1))
+    done
+    printf '\n  ]\n'
+  else
+    printf ']\n'
+  fi
+  printf '}\n'
+}
+
+print_text() {
+  printf 'Linux health report\n'
+  if [ "$root_disk_status" = available ]; then
+    printf 'Root disk: %s%% used (%s KiB used of %s KiB, %s KiB available)\n' "$disk_percent" "$disk_used_kib" "$disk_size_kib" "$disk_available_kib"
+  else
+    printf 'Root disk: unavailable\n'
+  fi
+  if [ "$memory_status" = available ]; then
+    printf 'Memory: %s MiB used of %s MiB (%s MiB available)\n' "$memory_used_mib" "$memory_total_mib" "$memory_available_mib"
+  else
+    printf 'Memory: unavailable\n'
+  fi
+  if [ "$load_status" = available ]; then
+    printf 'Load average: %s, %s, %s\n' "$load_one" "$load_five" "$load_fifteen"
+  else
+    printf 'Load average: unavailable\n'
+  fi
+  if [ "${#services[@]}" -eq 0 ]; then
+    printf 'Services: none requested\n'
+  else
+    printf 'Services:\n'
+    for service_record in "${service_states[@]}"; do
+      IFS=$'\t' read -r service service_state <<< "$service_record"
+      printf '  %s: %s\n' "$service" "$service_state"
+    done
+  fi
+}
+
+if [ "$json_output" = true ]; then
+  print_json
+else
+  print_text
 fi
