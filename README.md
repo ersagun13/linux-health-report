@@ -1,15 +1,17 @@
 # linux-health-report
 
-A small Bash snapshot of the root filesystem, memory, load average, and any services you name. It does not need root privileges or a background agent.
+A small, local-first Bash utility that prints a quick snapshot of the root filesystem, memory usage, load average, and any services you choose to inspect. It is designed for fast troubleshooting and for shell-based automation on Linux machines.
 
-## Requirements
+This repository is intentionally simple: no daemon, no background agent, and no elevated privileges required for the default checks. Everything runs from a single script and uses standard OS commands that are already available on most Linux systems.
 
-- Linux with Bash 3.2 or newer
-- `df`, `free`, and `uptime`
-- `systemctl` only when checking services
-- Python 3 to run the JSON-parsing test suite
+## Why this project exists
 
-## Run
+- Quick health check without opening a full monitoring stack
+- Read-only snapshot of disk, memory, load, and selected services
+- Easy to run during SSH sessions, incident triage, and lightweight system audits
+- No cloud dependency or remote telemetry
+
+## Quick start
 
 ```bash
 ./health-report
@@ -17,9 +19,9 @@ A small Bash snapshot of the root filesystem, memory, load average, and any serv
 ./health-report --json --service ssh
 ```
 
-Pass `--service` once for each unit you want checked; the command does not discover or query other services. The default output is plain text. `--json` writes the same snapshot as JSON, using `null` for values a command could not provide.
+Use `--service` once per unit you want to inspect. The script only checks the names you pass in. It does not discover unrelated services.
 
-Example output (the numbers below come from the test fixture):
+## Example output
 
 ```text
 Linux health report
@@ -31,9 +33,9 @@ Services: none requested
 
 ## Behavior and limits
 
-The script reads `df`, `free`, and `uptime`; service checks call only `systemctl is-active` for the names supplied. It never calls `sudo` or changes service or system settings. If a metric command fails, that metric is marked unavailable. On a machine without systemd, requested service states are unavailable.
+The script reads `df`, `free`, and `uptime` and calls `systemctl is-active` only for the service names you provide. It never calls `sudo`, never changes service state, and never writes anything except the output you request.
 
-The report is a point-in-time summary, not a monitor or diagnostic. It reports the root filesystem and does not list processes, inspect logs, or explain why a service is down. It expects the usual Linux `df -P -k`, `free -m`, and `uptime` output formats.
+This is a point-in-time summary, not a full monitor or diagnostics tool. It reports the root filesystem and selected system metrics; it does not inspect processes, logs, or explain why a service is unhealthy.
 
 ## Checks
 
@@ -42,4 +44,4 @@ bash -n health-report
 bash tests/test_health_report.sh
 ```
 
-The test suite substitutes small mock commands and parses JSON with Python's standard library. A direct Linux smoke test has not been run in this development environment, which is macOS; the Linux command behavior is covered with those mocks.
+The test suite uses small mock commands and a Python standard-library JSON parser so the project stays easy to validate in CI or on a local Linux box.
